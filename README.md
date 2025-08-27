@@ -1,1 +1,378 @@
-# multiviewer-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News HLS Multiviewer</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        #multiviewer {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .view {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        .view video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+            color: white;
+        }
+
+        .button {
+            position: absolute;
+            bottom: 10px;
+            width: 30px;
+            height: 30px;
+            background-color: rgba(255, 255, 255, 0.5);
+            border: none;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1000;
+            transition: opacity 0.3s ease;
+        }
+
+        .button:hover {
+            background-color: rgba(255, 255, 255, 0.8);
+        }
+
+        .camera-button {
+            right: 10px;
+        }
+
+        .mute-button {
+            right: 50px;
+        }
+
+        .fullscreen-button {
+            right: 90px;
+        }
+
+        .button img {
+            width: 20px;
+            height: 20px;
+        }
+
+        .volume-container {
+            position: absolute;
+            bottom: 50px;
+            right: 50px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        .mute-button:hover ~ .volume-container,
+        .volume-container:hover {
+            opacity: 1;
+        }
+
+        .volume-slider {
+            width: 100px;
+            height: 10px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255, 255, 255, 0.3);
+            outline: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 15px;
+            height: 15px;
+            background: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .volume-slider::-moz-range-thumb {
+            width: 15px;
+            height: 15px;
+            background: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        .view-title {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            font-size: 14px;
+            z-index: 1001;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        /* Hide buttons and titles in fullscreen mode when not hovering */
+        .view:fullscreen .button,
+        .view:fullscreen .view-title {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .view:fullscreen:hover .button,
+        .view:fullscreen:hover .view-title {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="multiviewer">
+        <div class="view" id="view1">
+            <div class="view-title">KCAL</div>
+        </div>
+        <div class="view" id="view2">
+            <div class="view-title">NBCLA News</div>
+        </div>
+        <div class="view" id="view3">
+            <div class="view-title">Telemundo 52 News</div>
+        </div>
+        <div class="view" id="view4">
+            <div class="view-title">ABC7LA</div>
+        </div>
+        <div class="view" id="view5">
+            <div class="view-title">KTLA 5</div>
+        </div>
+        <div class="view" id="view6">
+            <div class="view-title">FOXLA</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        async function fetchDynamicVideo(urlPassed, viewId, referer, origin) {
+            try {
+                const response = await fetch(`https://tkx.mp.lura.live/rest/v2/mcp/video/${urlPassed}`, {
+                    method: "POST",
+                    headers: {
+                        'Referer': referer,
+                        'Origin': origin
+                    }
+                });
+                if (response.status === 200) {
+                    const responseText = await response.text();
+                    const json = responseText.replace("anvatoVideoJSONLoaded(", "").slice(0, -1);
+                    const obj = JSON.parse(json);
+                    const videoUrl = obj.published_urls[0].embed_url;
+                    loadVideo(videoUrl, viewId);
+                } else {
+                    console.error(`Failed to fetch dynamic video: ${response.status}`);
+                    $(`#${viewId}`).html('<div class="loading">Failed to load video</div>');
+                }
+            } catch (error) {
+                console.error('Error fetching dynamic video:', error);
+                $(`#${viewId}`).html('<div class="loading">Error loading video</div>');
+            }
+        }
+
+        function addButtons(viewId) {
+            const viewElement = document.getElementById(viewId);
+
+            // Screenshot button
+            const cameraButton = document.createElement('button');
+            cameraButton.className = 'button camera-button';
+            cameraButton.innerHTML = `<img src="https://img.icons8.com/material-outlined/24/000000/camera.png" alt="Camera">`;
+            cameraButton.addEventListener('click', () => {
+                const video = viewElement.querySelector('video');
+                if (video) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const context = canvas.getContext('2d');
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    const link = document.createElement('a');
+                    link.download = `${viewId}_screenshot_${Date.now()}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                }
+            });
+            viewElement.appendChild(cameraButton);
+
+            // Mute/Unmute button
+            const muteButton = document.createElement('button');
+            muteButton.className = 'button mute-button';
+            muteButton.innerHTML = `<img src="https://img.icons8.com/material-outlined/24/000000/no-audio.png" alt="Mute">`;
+            viewElement.appendChild(muteButton);
+
+            // Volume container (slider + mute button)
+            const volumeContainer = document.createElement('div');
+            volumeContainer.className = 'volume-container';
+
+            // Volume slider
+            const volumeSlider = document.createElement('input');
+            volumeSlider.type = 'range';
+            volumeSlider.className = 'volume-slider';
+            volumeSlider.min = 0;
+            volumeSlider.max = 100;
+            volumeSlider.value = 100;
+            volumeSlider.step = 1;
+            volumeContainer.appendChild(volumeSlider);
+
+            viewElement.appendChild(volumeContainer);
+
+            // Mute/Unmute functionality
+            muteButton.addEventListener('click', () => {
+                const video = viewElement.querySelector('video');
+                if (video) {
+                    video.muted = !video.muted;
+                    muteButton.innerHTML = video.muted ?
+                        `<img src="https://img.icons8.com/material-outlined/24/000000/no-audio.png" alt="Mute">` :
+                        `<img src="https://pngimg.com/d/sound_PNG20.png" alt="Unmute">`;
+                    volumeSlider.value = video.muted ? 0 : video.volume * 100;
+                }
+            });
+
+            // Volume slider functionality
+            volumeSlider.addEventListener('input', () => {
+                const video = viewElement.querySelector('video');
+                if (video) {
+                    video.volume = volumeSlider.value / 100;
+                    if (video.muted && volumeSlider.value > 0) {
+                        video.muted = false;
+                        muteButton.innerHTML = `<img src="https://pngimg.com/d/sound_PNG20.png" alt="Unmute">`;
+                    }
+                }
+            });
+
+            // Fullscreen button
+            const fullscreenButton = document.createElement('button');
+            fullscreenButton.className = 'button fullscreen-button';
+            fullscreenButton.innerHTML = `<img src="https://img.icons8.com/material-outlined/24/000000/full-screen.png" alt="Fullscreen">`;
+            fullscreenButton.addEventListener('click', () => {
+                toggleFullscreen(viewElement);
+            });
+            viewElement.appendChild(fullscreenButton);
+        }
+
+        function toggleFullscreen(element) {
+            if (!document.fullscreenElement) {
+                if (element.requestFullscreen) {
+                    element.requestFullscreen();
+                } else if (element.mozRequestFullScreen) { // Firefox
+                    element.mozRequestFullScreen();
+                } else if (element.webkitRequestFullscreen) { // Chrome, Safari, and Opera
+                    element.webkitRequestFullscreen();
+                } else if (element.msRequestFullscreen) { // IE/Edge
+                    element.msRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
+
+        function loadVideo(url, viewId) {
+            const view = document.getElementById(viewId);
+            const existingVideo = view.querySelector('video');
+            if (existingVideo) {
+                view.removeChild(existingVideo); // remove only the video element, not the title
+            }
+            
+            const videoElement = document.createElement('video');
+            videoElement.controls = false;
+            videoElement.muted = true;
+            view.appendChild(videoElement);
+
+            addButtons(viewId);
+
+            if (Hls.isSupported()) {
+                const hls = new Hls();
+                hls.loadSource(url);
+                hls.attachMedia(videoElement);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => videoElement.play());
+            } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                videoElement.src = url;
+                videoElement.play();
+            } else {
+                view.innerHTML = '<div class="loading">Unsupported browser</div>';
+            }
+        }
+
+        // Initialize streams
+        document.addEventListener('DOMContentLoaded', () => {
+            const hlsSources = [
+                { id: 'view1', url: 'https://cbsn-la.cbsnstream.cbsnews.com/out/v1/57b6c4534a164accb6b1872b501e0028/master.m3u8' },
+                { id: 'view2', url: 'https://d4ybyqrhce41r.cloudfront.net/v1/master/3fec3e5cac39a52b2132f9c66c83dae043dc17d4/prod-xumo-linear-nbcu-hlsv3/playlist.m3u8?ads.channelId=99951164' },
+                { id: 'view3', url: 'https://d1rqgw5gocwo9i.cloudfront.net/10009/99951225/hls/playlist.m3u8?ads.xumo_channelId=99951225' },
+                { id: 'view4', url: 'https://content.uplynk.com/channel/ext/2118d9222a87420ab69223af9cfa0a0f/kabc_24x7_news.m3u8' },
+            ];
+
+            hlsSources.forEach(({ id, url }) => loadVideo(url, id));
+
+            const dynamicSources = [
+                {
+                    id: 'view5',
+                    url: 'adstAGlNmY8ve6p5?anvack=X8POa4zpGZMmeiq0wqiO8IP5rMqQM9VN',
+                    referer: 'https://ktla.com/on-air/live-streaming/',
+                    origin: 'https://ktla.com'
+                },
+                {
+                    id: 'view6',
+                    url: 'adstagVGMDJqZNyX?anvack=bmQv8nXMalCOobBhvhpo9eMTE1OzN4lD',
+                    referer: 'https://www.foxla.com/live',
+                    origin: 'https://www.foxla.com/live'
+                }
+            ];
+
+            dynamicSources.forEach(({ id, url, referer, origin }) => {
+                fetchDynamicVideo(url, id, referer, origin);
+            });
+        });
+
+        // Keyboard shortcuts for fullscreen
+        document.addEventListener('keydown', (event) => {
+            const key = event.key;
+            if (key >= '1' && key <= '6') {
+                const viewId = `view${key}`;
+                const viewElement = document.getElementById(viewId);
+                if (viewElement) {
+                    toggleFullscreen(viewElement);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
